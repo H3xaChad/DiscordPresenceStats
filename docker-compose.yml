@@ -11,7 +11,7 @@ services:
     env_file:
       - .env
     volumes:
-      - data:/data
+      - ./data:/data
     environment:
       - DATABASE_PATH=/data/stats.db
     networks:
@@ -43,7 +43,7 @@ services:
     ports:
       - "5001:5000"
     volumes:
-      - data:/data
+      - ./data:/data
     environment:
       - DATABASE_PATH=/data/stats.db
       - WEB_HOST=0.0.0.0
@@ -69,7 +69,3 @@ services:
 networks:
   lan-party-net:
     driver: bridge
-
-volumes:
-  data:
-    driver: local
