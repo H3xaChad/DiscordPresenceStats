@@ -107,14 +107,31 @@ async def run_bot(token: str, db_path: str = "stats.db"):
 
     async def runner():
         """Run bot and wait for shutdown signal."""
-        async with bot:
-            await bot.start(token)
+        try:
+            async with bot:
+                logger.info("Attempting to connect to Discord...")
+                await bot.start(token)
+        except discord.errors.LoginFailure as e:
+            logger.error(f"Login failed! Invalid token or bot configuration: {e}")
+            shutdown_event.set()
+            raise
+        except discord.errors.PrivilegedIntentsRequired as e:
+            logger.error(f"Missing required intents! Enable PRESENCE, MEMBERS, and MESSAGE_CONTENT intents in Developer Portal: {e}")
+            shutdown_event.set()
+            raise
+        except Exception as e:
+            logger.error(f"Bot startup failed: {e}", exc_info=True)
+            shutdown_event.set()
+            raise
     
     try:
         bot_task = asyncio.create_task(runner())
         await shutdown_event.wait()
         
-        await bot.close()
+        # Only try to close if bot isn't already closed
+        if not bot.is_closed():
+            logger.info("Closing bot connection...")
+            await bot.close()
         
         try:
             await asyncio.wait_for(bot_task, timeout=2.0)
@@ -125,9 +142,13 @@ async def run_bot(token: str, db_path: str = "stats.db"):
                 await bot_task
             except asyncio.CancelledError:
                 pass
+        except Exception:
+            pass  # Task already completed with error
                 
     except discord.errors.LoginFailure:
         logger.error("Invalid Discord token!")
+    except discord.errors.PrivilegedIntentsRequired:
+        logger.error("Enable required intents in Discord Developer Portal!")
     except Exception as e:
         logger.error(f"Runtime error: {e}", exc_info=True)
     finally:

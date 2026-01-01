@@ -4,12 +4,13 @@
 
 {% block content %}
 <div class="player-header">
+    <div class="player-header-top">
+        <a href="/leaderboard" class="back-arrow" title="Back to Leaderboard">←</a>
+        <h1 class="player-name">{{ player.display_name or player.username }}</h1>
+    </div>
     <div class="player-info-row">
         <img src="{{ player.avatar_url or 'https://cdn.discordapp.com/embed/avatars/' ~ ((player.user_id // 4194304) % 6) ~ '.png?size=256' }}" alt="{{ player.display_name or player.username }}" class="player-avatar-large" loading="lazy">
-        <div class="player-name-section">
-            <h1 class="player-name">{{ player.display_name or player.username }}</h1>
-        </div>
-        <article class="stat-card">
+        <article class="stat-card stat-card-expanded">
             <header>⏱️ Total Playtime</header>
             <h2>{{ player.total_playtime_readable }}</h2>
         </article>
@@ -72,7 +73,7 @@
     <div class="spotify-summary">
         <div class="summary-stat">
             <span class="label">Total Listening Time</span>
-            <span class="value">{{ spotify.readable }} ({{ spotify.hours }}h)</span>
+            <span class="value">{{ spotify.readable }}</span>
         </div>
         <div class="summary-stat">
             <span class="label">Unique Tracks</span>
@@ -126,9 +127,5 @@
     <p class="no-data">No Spotify data available yet</p>
     {% endif %}
 </section>
-
-<div class="back-button-container">
-    <a href="/leaderboard" role="button" class="secondary back-button">← Back to Leaderboard</a>
-</div>
 
 {% endblock %}

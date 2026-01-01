@@ -1,27 +1,54 @@
-# Use Python 3.11 slim image
-FROM python:3.11-slim
+# Multi-stage build for optimized image size
+FROM python:3.13-slim AS builder
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Set working directory
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml setup.py ./
+# Copy dependency files first (better layer caching)
+COPY pyproject.toml ./
 
-# Install dependencies
-RUN pip install --no-cache-dir -e ".[web]"
+# Create virtual environment and install dependencies
+RUN uv venv /opt/venv && \
+    uv pip install --python /opt/venv/bin/python --no-cache -r pyproject.toml --extra web
 
-# Copy application code
-COPY . .
+# Final stage - minimal runtime image
+FROM python:3.13-slim
 
-# Create directory for database and logs
-RUN mkdir -p /data
+# Set working directory
+WORKDIR /app
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy application code (only what's needed)
+COPY main.py web_main.py ./
+COPY src/ ./src/
+COPY static/ ./static/
+COPY templates/ ./templates/
+
+# Create data directory
+RUN mkdir -p /data && \
+    useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app /data
+
+# Switch to non-root user
+USER appuser
+
+# Set environment variables
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    DATABASE_PATH=/data/stats.db
 
 # Expose web server port
 EXPOSE 5000
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV DATABASE_PATH=/data/stats.db
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import sys; sys.exit(0)"
 
-# Default command (can be overridden in docker-compose)
+# Default command
 CMD ["python", "web_main.py"]
