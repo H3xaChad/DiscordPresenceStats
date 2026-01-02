@@ -12,10 +12,9 @@ logger = logging.getLogger(__name__)
 class ActivityTracker:
     """Tracks user activities across Discord."""
     
-    def __init__(self, db: Database, max_session_hours: int = 12):
+    def __init__(self, db: Database):
         self.db = db
         self.active_sessions: Dict[int, Dict[str, int]] = {}
-        self.max_session_hours = max_session_hours
     
     async def handle_presence_update(self, before: discord.Member, after: discord.Member):
         """Handle Discord presence updates."""
@@ -142,35 +141,38 @@ class ActivityTracker:
         self.active_sessions.clear()
     
     async def initialize_from_current_state(self, bot):
-        """Initialize tracker from current Discord state and recover from crashes."""
+        """Initialize tracker from current Discord state and recover from crashes.
+        
+        This method recovers ALL orphaned sessions regardless of age by:
+        1. Getting all orphaned sessions from the database
+        2. Checking which users are currently active
+        3. Recovering sessions for currently active users
+        4. Properly closing sessions for inactive users with accurate duration
+        """
         logger.info("Checking for orphaned sessions from previous run...")
         
-        # Step 1: Handle old orphaned sessions (likely from crashes long ago)
-        old_orphaned_games, old_orphaned_spotify = await self.db.get_all_orphaned_sessions(self.max_session_hours)
-        if old_orphaned_games or old_orphaned_spotify:
-            logger.warning(f"Found {len(old_orphaned_games)} orphaned game sessions and {len(old_orphaned_spotify)} orphaned Spotify sessions")
-            logger.info(f"Closing orphaned sessions with {self.max_session_hours}h cap to prevent data corruption...")
-            
-            for session_id in old_orphaned_games:
-                await self.db.close_orphaned_session_with_cap(session_id, 'game_sessions', self.max_session_hours)
-            
-            for session_id in old_orphaned_spotify:
-                await self.db.close_orphaned_session_with_cap(session_id, 'spotify_sessions', self.max_session_hours)
-            
-            logger.info("Orphaned sessions closed successfully")
+        # Get ALL orphaned sessions (no time limit)
+        orphaned_games, orphaned_spotify = await self.db.get_all_orphaned_sessions()
         
-        # Step 2: Try to recover recent sessions (from restart within last 5 minutes)
-        recent_games, recent_spotify = await self.db.get_recent_orphaned_sessions(max_minutes=5)
+        if not orphaned_games and not orphaned_spotify:
+            logger.info("No orphaned sessions found")
+        else:
+            logger.warning(
+                f"Found {len(orphaned_games)} orphaned game sessions and "
+                f"{len(orphaned_spotify)} orphaned Spotify sessions from previous run"
+            )
+        
         recovered_sessions = {'games': 0, 'spotify': 0}
+        closed_sessions = {'games': 0, 'spotify': 0}
         
-        logger.info("Scanning current activity and recovering recent sessions...")
+        logger.info("Scanning current Discord activity...")
         
         active_games = 0
         active_spotify = 0
         
-        # Build lookup maps for recent orphaned sessions
-        user_game_sessions = {(user_id, game_id): session_id for session_id, user_id, game_id in recent_games}
-        user_spotify_sessions = {(user_id, track_id): session_id for session_id, user_id, track_id in recent_spotify}
+        # Build lookup maps for ALL orphaned sessions
+        user_game_sessions = {(user_id, game_id): session_id for session_id, user_id, game_id in orphaned_games}
+        user_spotify_sessions = {(user_id, track_id): session_id for session_id, user_id, track_id in orphaned_spotify}
         
         for guild in bot.guilds:
             for member in guild.members:
@@ -190,14 +192,15 @@ class ActivityTracker:
                     game_id = await self.db.get_or_create_game(game_name)
                     session_key = (user_id, game_id)
                     
-                    # Check if we can recover this session
+                    # Check if we can recover an orphaned session
                     if session_key in user_game_sessions:
                         session_id = user_game_sessions[session_key]
                         self.active_sessions[user_id]['game'] = session_id
-                        logger.info(f"Recovered game session for {member.name}: {game_name}")
+                        logger.info(f"✅ Recovered game session for {member.name}: {game_name}")
                         recovered_sessions['games'] += 1
                         del user_game_sessions[session_key]  # Mark as recovered
                     else:
+                        # Start new session (no matching orphaned session)
                         await self._start_game_session(user_id, member.name, game_name)
                     active_games += 1
                 
@@ -208,27 +211,39 @@ class ActivityTracker:
                     track_id = await self.db.get_or_create_track(title, artist, album)
                     session_key = (user_id, track_id)
                     
-                    # Check if we can recover this session
+                    # Check if we can recover an orphaned session
                     if session_key in user_spotify_sessions:
                         session_id = user_spotify_sessions[session_key]
                         self.active_sessions[user_id]['spotify'] = session_id
-                        logger.info(f"Recovered Spotify session for {member.name}: {title}")
+                        logger.info(f"✅ Recovered Spotify session for {member.name}: {title}")
                         recovered_sessions['spotify'] += 1
                         del user_spotify_sessions[session_key]  # Mark as recovered
                     else:
+                        # Start new session (no matching orphaned session)
                         await self._start_spotify_session(user_id, member.name, spotify_info)
                     active_spotify += 1
         
-        # Step 3: Close remaining recent orphaned sessions that weren't recovered
+        # Close remaining orphaned sessions that weren't recovered
+        # These are sessions where the user is no longer doing that activity
         for session_id, user_id, game_id in user_game_sessions.values():
             await self.db.end_game_session(session_id)
-            logger.info(f"Closed unrecovered recent game session (user no longer active)")
+            closed_sessions['games'] += 1
         
         for session_id, user_id, track_id in user_spotify_sessions.values():
             await self.db.end_spotify_session(session_id)
-            logger.info(f"Closed unrecovered recent Spotify session (user no longer active)")
+            closed_sessions['spotify'] += 1
         
+        # Log summary
         if recovered_sessions['games'] > 0 or recovered_sessions['spotify'] > 0:
-            logger.info(f"Recovered {recovered_sessions['games']} game and {recovered_sessions['spotify']} Spotify sessions from restart")
+            logger.info(
+                f"✅ Recovered {recovered_sessions['games']} game and "
+                f"{recovered_sessions['spotify']} Spotify sessions from restart"
+            )
+        
+        if closed_sessions['games'] > 0 or closed_sessions['spotify'] > 0:
+            logger.info(
+                f"✔️  Properly closed {closed_sessions['games']} game and "
+                f"{closed_sessions['spotify']} Spotify sessions (users no longer active)"
+            )
         
         logger.info(f"Tracking {len(self.active_sessions)} users ({active_games} gaming, {active_spotify} listening)")
