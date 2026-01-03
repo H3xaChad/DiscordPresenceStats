@@ -20,6 +20,24 @@ nav {
     border-bottom: 1px solid rgba(59, 130, 246, 0.2);
 }
 
+nav a {
+    position: relative;
+    transition: all 0.25s ease;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+}
+
+nav a:hover {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(59, 130, 246, 0.05));
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    box-shadow: 
+        0 0 12px rgba(59, 130, 246, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(8px);
+    color: #fff;
+}
+
 nav a.active {
     color: var(--primary);
     border-bottom: 2px solid var(--primary);
@@ -373,19 +391,14 @@ tr.podium-3 {
 
 .player-info-row {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     gap: 1.5rem;
     margin-bottom: 2rem;
 }
 
 .player-info-row .stat-card {
-    min-width: 250px;
-    flex-shrink: 0;
-}
-
-.stat-card-expanded {
-    flex-grow: 1;
-    min-width: auto !important;
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 .player-avatar-large {
@@ -395,6 +408,21 @@ tr.podium-3 {
     border: 4px solid var(--primary);
     object-fit: cover;
     box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+    flex-shrink: 0;
+}
+
+.game-icon-large {
+    width: 120px;
+    height: 120px;
+    border-radius: 16px;
+    border: 4px solid var(--primary);
+    background: rgba(59, 130, 246, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 4rem;
+    box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+    flex-shrink: 0;
 }
 
 .player-name {

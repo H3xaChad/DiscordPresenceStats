@@ -25,7 +25,9 @@
                 <td>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <div class="game-icon-placeholder">🎮</div>
-                        <strong>{{ game.name }}</strong>
+                        <a href="/game/{{ game.name }}" style="color: inherit; text-decoration: none;">
+                            <strong>{{ game.name }}</strong>
+                        </a>
                     </div>
                 </td>
                 <td>{{ game.readable }} <small>({{ game.hours }}h)</small></td>

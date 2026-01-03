@@ -1,4 +1,4 @@
-<div class="grid" id="overview-stats">
+<div class="grid" id="overview-stats" hx-get="/htmx/overview-stats" hx-trigger="every 60s" hx-swap="outerHTML">
     <article>
         <header>👥 Tracked Players</header>
         <h2>{{ overview.unique_players }}</h2>

@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}{{ game.game_name }} - Game Stats{% endblock %}
+
+{% block content %}
+<div class="player-header">
+    <div class="player-header-top">
+        <a href="/games" class="back-arrow" title="Back to Games">←</a>
+        <h1 class="player-name">{{ game.game_name }}</h1>
+    </div>
+    <div class="player-info-row">
+        <div class="game-icon-large">🎮</div>
+        <article class="stat-card">
+            <header>⏱️ Total Playtime</header>
+            <h2>{{ game.readable }}</h2>
+        </article>
+        <article class="stat-card">
+            <header>👥 Unique Players</header>
+            <h2>{{ game.unique_players }}</h2>
+        </article>
+    </div>
+</div>
+
+<section>
+    <h2>📊 Player Activity Over Time</h2>
+    <p class="section-subtitle">Hourly player count and playtime since first session</p>
+    <canvas id="timelineChart" style="max-height: 400px;"></canvas>
+</section>
+
+<section class="games-section">
+    <h2>🏆 Top Players</h2>
+    <p class="section-subtitle">All players ranked by playtime</p>
+    
+    {% if game.players %}
+    <div class="table-container">
+        <table class="games-table">
+            <thead>
+                <tr>
+                    <th class="rank-col">Rank</th>
+                    <th class="game-name-col">Player</th>
+                    <th class="playtime-col">Playtime</th>
+                    <th class="hours-col">Hours</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for player in game.players %}
+                <tr class="game-row {% if loop.index == 1 %}top-game{% endif %}">
+                    <td class="rank-cell">
+                        {% if loop.index == 1 %}
+                            <span class="medal gold">🥇</span>
+                        {% elif loop.index == 2 %}
+                            <span class="medal silver">🥈</span>
+                        {% elif loop.index == 3 %}
+                            <span class="medal bronze">🥉</span>
+                        {% else %}
+                            <strong>{{ loop.index }}</strong>
+                        {% endif %}
+                    </td>
+                    <td class="game-name-cell">
+                        <a href="/player/{{ player.user_id }}" style="color: inherit; text-decoration: none;">
+                            <strong>{{ player.display_name or player.username }}</strong>
+                        </a>
+                    </td>
+                    <td class="playtime-cell">{{ player.readable }}</td>
+                    <td class="hours-cell">{{ player.hours }}h</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="no-data">No player data available</p>
+    {% endif %}
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const ctx = document.getElementById('timelineChart').getContext('2d');
+    
+    const timelineData = {{ game.timeline | tojson }};
+    const labels = timelineData.map(t => {
+        if (!t.date) return 'Unknown';
+        const d = new Date(t.date);
+        return d.toLocaleString('en-US', { 
+            month: 'short', 
+            day: 'numeric', 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+    });
+    const playerCounts = timelineData.map(t => t.player_count);
+    const hours = timelineData.map(t => t.hours);
+    
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Players',
+                data: playerCounts,
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                fill: true,
+                tension: 0.4,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: { 
+                    display: true,
+                    labels: { color: '#fff' }
+                },
+                tooltip: {
+                    callbacks: {
+                        afterLabel: function(context) {
+                            const idx = context.dataIndex;
+                            return 'Total playtime: ' + hours[idx] + 'h';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { 
+                        color: '#fff',
+                        maxRotation: 45,
+                        minRotation: 45
+                    },
+                    grid: { color: '#374151' }
+                },
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    beginAtZero: true,
+                    ticks: { 
+                        color: '#fff',
+                        stepSize: 1
+                    },
+                    grid: { color: '#374151' },
+                    title: {
+                        display: true,
+                        text: 'Number of Players',
+                        color: '#fff'
+                    }
+                }
+            }
+        }
+    });
+</script>
+{% endblock %}

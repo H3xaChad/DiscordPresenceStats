@@ -26,7 +26,7 @@ class StatsManager:
         self.db = db
     
     async def get_player_stats(self, user_id: int) -> Optional[Dict]:
-        """Get comprehensive stats for a player."""
+        """Get comprehensive stats for a player, including active sessions."""
         user = await self.db.get_user(user_id)
         if not user:
             return None
@@ -35,9 +35,10 @@ class StatsManager:
         
         async with self.db._connection.cursor() as cursor:
             await cursor.execute("""
-                SELECT g.game_name, SUM(gs.duration_seconds) as total_seconds
+                SELECT g.game_name, SUM(COALESCE(gs.duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(gs.start_time)) * 86400 AS INTEGER))) as total_seconds
                 FROM game_sessions gs JOIN games g ON gs.game_id = g.game_id
-                WHERE gs.user_id = ? AND gs.duration_seconds IS NOT NULL
+                WHERE gs.user_id = ?
                 GROUP BY g.game_id ORDER BY total_seconds DESC
             """, (user_id,))
             games = await cursor.fetchall()
@@ -95,18 +96,33 @@ class StatsManager:
         if not players:
             return None
         
-        total_seconds = sum(p[2] for p in players)
+        total_seconds = sum(p[3] for p in players)
+        timeline = await self.db.get_game_timeline(game_name)
+        
         return {
             'game_name': game_name,
             'total_seconds': total_seconds,
             'readable': seconds_to_readable(total_seconds),
             'hours': seconds_to_hours(total_seconds),
             'unique_players': len(players),
-            'players': [{'username': p[0], 'display_name': p[1], 'seconds': p[2], 'readable': seconds_to_readable(p[2]), 'hours': seconds_to_hours(p[2])} for p in players]
+            'players': [{
+                'username': p[0], 
+                'display_name': p[1], 
+                'user_id': p[2],
+                'seconds': p[3], 
+                'readable': seconds_to_readable(p[3]), 
+                'hours': seconds_to_hours(p[3])
+            } for p in players],
+            'timeline': [{
+                'date': t[0],
+                'player_count': t[1],
+                'total_seconds': t[2],
+                'hours': seconds_to_hours(t[2])
+            } for t in timeline]
         }
     
     async def get_top_spotify_tracks(self, limit: int = 10) -> List[Dict]:
-        """Get top Spotify tracks."""
+        """Get top Spotify tracks, including active sessions."""
         tracks = await self.db.get_top_spotify_tracks(limit)
         return [{
             'rank': idx,
@@ -120,15 +136,20 @@ class StatsManager:
         } for idx, t in enumerate(tracks, 1)]
     
     async def get_user_spotify_stats(self, user_id: int) -> Dict:
-        """Get Spotify stats for a user."""
+        """Get Spotify stats for a user, including active sessions."""
         async with self.db._connection.cursor() as cursor:
-            await cursor.execute("SELECT COALESCE(SUM(duration_seconds), 0) FROM spotify_sessions WHERE user_id = ? AND duration_seconds IS NOT NULL", (user_id,))
+            await cursor.execute("""
+                SELECT COALESCE(SUM(COALESCE(duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(start_time)) * 86400 AS INTEGER))), 0) 
+                FROM spotify_sessions WHERE user_id = ?
+            """, (user_id,))
             total_seconds = (await cursor.fetchone())[0]
             
             await cursor.execute("""
-                SELECT st.title, st.artist, st.album, SUM(ss.duration_seconds) as total_seconds
+                SELECT st.title, st.artist, st.album, SUM(COALESCE(ss.duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(ss.start_time)) * 86400 AS INTEGER))) as total_seconds
                 FROM spotify_sessions ss JOIN spotify_tracks st ON ss.track_id = st.track_id
-                WHERE ss.user_id = ? AND ss.duration_seconds IS NOT NULL
+                WHERE ss.user_id = ?
                 GROUP BY ss.track_id ORDER BY total_seconds DESC
             """, (user_id,))
             tracks = await cursor.fetchall()
@@ -142,12 +163,20 @@ class StatsManager:
         }
     
     async def get_overview_stats(self) -> Dict:
-        """Get overview statistics for entire server."""
+        """Get overview statistics for entire server, including active sessions."""
         async with self.db._connection.cursor() as cursor:
-            await cursor.execute("SELECT COALESCE(SUM(duration_seconds), 0) FROM game_sessions WHERE duration_seconds IS NOT NULL")
+            await cursor.execute("""
+                SELECT COALESCE(SUM(COALESCE(duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(start_time)) * 86400 AS INTEGER))), 0) 
+                FROM game_sessions
+            """)
             total_game_seconds = (await cursor.fetchone())[0]
             
-            await cursor.execute("SELECT COALESCE(SUM(duration_seconds), 0) FROM spotify_sessions WHERE duration_seconds IS NOT NULL")
+            await cursor.execute("""
+                SELECT COALESCE(SUM(COALESCE(duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(start_time)) * 86400 AS INTEGER))), 0) 
+                FROM spotify_sessions
+            """)
             total_spotify_seconds = (await cursor.fetchone())[0]
             
             await cursor.execute("SELECT COUNT(DISTINCT user_id) FROM game_sessions")

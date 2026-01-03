@@ -130,6 +130,24 @@ async def player_stats(request: Request, user_id: int):
     })
 
 
+@app.get("/game/{game_name:path}", response_class=HTMLResponse)
+async def game_details(request: Request, game_name: str):
+    """Individual game statistics page."""
+    game = await stats.get_game_details(game_name)
+    
+    if not game:
+        return templates.TemplateResponse("404.html", {
+            "request": request,
+            "message": f"Game not found"
+        }, status_code=404)
+    
+    return templates.TemplateResponse("game.html", {
+        "request": request,
+        "game": game,
+        "page": "games"
+    })
+
+
 # HTMX partial endpoints for live updates
 @app.get("/htmx/overview-stats")
 async def htmx_overview_stats(request: Request):

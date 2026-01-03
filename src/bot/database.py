@@ -221,10 +221,23 @@ class Database:
             return (orphaned_games, orphaned_spotify)
     
     async def get_user_total_playtime(self, user_id: int) -> int:
-        """Get total playtime in seconds for user."""
+        """Get total playtime in seconds for user, including active sessions."""
         async with self._connection.cursor() as cursor:
-            await cursor.execute("SELECT COALESCE(SUM(duration_seconds), 0) FROM game_sessions WHERE user_id = ? AND duration_seconds IS NOT NULL", (user_id,))
-            return (await cursor.fetchone())[0]
+            await cursor.execute("""
+                SELECT COALESCE(SUM(duration_seconds), 0) FROM game_sessions WHERE user_id = ? AND duration_seconds IS NOT NULL
+            """, (user_id,))
+            finished_seconds = (await cursor.fetchone())[0]
+            
+            # Add current active session duration
+            await cursor.execute("""
+                SELECT CAST((julianday(CURRENT_TIMESTAMP) - julianday(start_time)) * 86400 AS INTEGER)
+                FROM game_sessions
+                WHERE user_id = ? AND end_time IS NULL
+            """, (user_id,))
+            active_row = await cursor.fetchone()
+            active_seconds = active_row[0] if active_row else 0
+            
+            return finished_seconds + active_seconds
     
     async def get_user_game_playtime(self, user_id: int, game_name: str) -> int:
         """Get playtime in seconds for specific user and game."""
@@ -237,11 +250,12 @@ class Database:
             return (await cursor.fetchone())[0]
     
     async def get_top_games(self, limit: int = 10) -> List[Tuple]:
-        """Get top games by total playtime."""
+        """Get top games by total playtime, including active sessions."""
         async with self._connection.cursor() as cursor:
             await cursor.execute("""
                 SELECT g.game_name, 
-                       COALESCE(SUM(gs.duration_seconds), 0) as total_seconds, 
+                       COALESCE(SUM(COALESCE(gs.duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(gs.start_time)) * 86400 AS INTEGER))), 0) as total_seconds,
                        COUNT(DISTINCT gs.user_id) as unique_players
                 FROM games g 
                 LEFT JOIN game_sessions gs ON gs.game_id = g.game_id
@@ -252,37 +266,38 @@ class Database:
             return await cursor.fetchall()
     
     async def get_player_leaderboard(self, limit: int = 10) -> List[Tuple]:
-        """Get player leaderboard by total playtime with enhanced stats."""
+        """Get player leaderboard by total playtime with enhanced stats, including active sessions."""
         async with self._connection.cursor() as cursor:
             # Simplified query using CTEs for better readability and performance
             await cursor.execute("""
                 WITH game_stats AS (
                     SELECT 
                         user_id,
-                        SUM(duration_seconds) as total_seconds,
+                        SUM(COALESCE(duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(start_time)) * 86400 AS INTEGER))) as total_seconds,
                         COUNT(DISTINCT game_id) as games_played
                     FROM game_sessions
-                    WHERE duration_seconds IS NOT NULL
                     GROUP BY user_id
                 ),
                 top_game AS (
                     SELECT 
                         gs.user_id,
                         g.game_name,
-                        SUM(gs.duration_seconds) as game_seconds,
-                        ROW_NUMBER() OVER (PARTITION BY gs.user_id ORDER BY SUM(gs.duration_seconds) DESC) as rn
+                        SUM(COALESCE(gs.duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(gs.start_time)) * 86400 AS INTEGER))) as game_seconds,
+                        ROW_NUMBER() OVER (PARTITION BY gs.user_id ORDER BY SUM(COALESCE(gs.duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(gs.start_time)) * 86400 AS INTEGER))) DESC) as rn
                     FROM game_sessions gs
                     JOIN games g ON gs.game_id = g.game_id
-                    WHERE gs.duration_seconds IS NOT NULL
                     GROUP BY gs.user_id, g.game_id
                 ),
                 spotify_stats AS (
                     SELECT 
                         user_id,
                         COUNT(DISTINCT track_id) as tracks_count,
-                        SUM(duration_seconds) as total_seconds
+                        SUM(COALESCE(duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(start_time)) * 86400 AS INTEGER))) as total_seconds
                     FROM spotify_sessions
-                    WHERE duration_seconds IS NOT NULL
                     GROUP BY user_id
                 )
                 SELECT 
@@ -306,25 +321,45 @@ class Database:
             return await cursor.fetchall()
     
     async def get_top_spotify_tracks(self, limit: int = 10) -> List[Tuple]:
-        """Get top Spotify tracks by listening time."""
+        """Get top Spotify tracks by listening time, including active sessions."""
         async with self._connection.cursor() as cursor:
             await cursor.execute("""
-                SELECT st.title, st.artist, st.album, SUM(ss.duration_seconds) as total_seconds, COUNT(DISTINCT ss.user_id) as unique_listeners
+                SELECT st.title, st.artist, st.album, 
+                       SUM(COALESCE(ss.duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(ss.start_time)) * 86400 AS INTEGER))) as total_seconds, 
+                       COUNT(DISTINCT ss.user_id) as unique_listeners
                 FROM spotify_sessions ss JOIN spotify_tracks st ON ss.track_id = st.track_id
-                WHERE ss.duration_seconds IS NOT NULL
                 GROUP BY ss.track_id ORDER BY total_seconds DESC LIMIT ?
             """, (limit,))
             return await cursor.fetchall()
     
     async def get_game_players(self, game_name: str) -> List[Tuple]:
-        """Get all players and playtime for specific game."""
+        """Get all players and playtime for specific game, including active sessions."""
         async with self._connection.cursor() as cursor:
             await cursor.execute("""
-                SELECT u.username, u.display_name, SUM(gs.duration_seconds) as total_seconds
+                SELECT u.username, u.display_name, u.user_id,
+                       SUM(COALESCE(gs.duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(gs.start_time)) * 86400 AS INTEGER))) as total_seconds
                 FROM game_sessions gs
                 JOIN users u ON gs.user_id = u.user_id
                 JOIN games g ON gs.game_id = g.game_id
-                WHERE g.game_name = ? AND gs.duration_seconds IS NOT NULL
+                WHERE g.game_name = ?
                 GROUP BY gs.user_id ORDER BY total_seconds DESC
+            """, (game_name,))
+            return await cursor.fetchall()
+    
+    async def get_game_timeline(self, game_name: str) -> List[Tuple]:
+        """Get game session timeline showing player count over time (hourly)."""
+        async with self._connection.cursor() as cursor:
+            await cursor.execute("""
+                SELECT strftime('%Y-%m-%d %H:00:00', gs.start_time) as session_hour,
+                       COUNT(DISTINCT gs.user_id) as player_count,
+                       SUM(COALESCE(gs.duration_seconds, 
+                                    CAST((julianday(CURRENT_TIMESTAMP) - julianday(gs.start_time)) * 86400 AS INTEGER))) as total_seconds
+                FROM game_sessions gs
+                JOIN games g ON gs.game_id = g.game_id
+                WHERE g.game_name = ?
+                GROUP BY strftime('%Y-%m-%d %H:00:00', gs.start_time)
+                ORDER BY session_hour ASC
             """, (game_name,))
             return await cursor.fetchall()

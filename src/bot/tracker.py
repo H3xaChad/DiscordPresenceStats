@@ -171,8 +171,8 @@ class ActivityTracker:
         active_spotify = 0
         
         # Build lookup maps for ALL orphaned sessions
-        user_game_sessions = {(user_id, game_id): session_id for session_id, user_id, game_id in orphaned_games}
-        user_spotify_sessions = {(user_id, track_id): session_id for session_id, user_id, track_id in orphaned_spotify}
+        user_game_sessions = {(user_id, game_id): (session_id, user_id, game_id) for session_id, user_id, game_id in orphaned_games}
+        user_spotify_sessions = {(user_id, track_id): (session_id, user_id, track_id) for session_id, user_id, track_id in orphaned_spotify}
         
         for guild in bot.guilds:
             for member in guild.members:
@@ -194,9 +194,9 @@ class ActivityTracker:
                     
                     # Check if we can recover an orphaned session
                     if session_key in user_game_sessions:
-                        session_id = user_game_sessions[session_key]
+                        session_id, _, _ = user_game_sessions[session_key]
                         self.active_sessions[user_id]['game'] = session_id
-                        logger.info(f"✅ Recovered game session for {member.name}: {game_name}")
+                        logger.info(f"Recovered game session for {member.name}: {game_name}")
                         recovered_sessions['games'] += 1
                         del user_game_sessions[session_key]  # Mark as recovered
                     else:
@@ -213,9 +213,9 @@ class ActivityTracker:
                     
                     # Check if we can recover an orphaned session
                     if session_key in user_spotify_sessions:
-                        session_id = user_spotify_sessions[session_key]
+                        session_id, _, _ = user_spotify_sessions[session_key]
                         self.active_sessions[user_id]['spotify'] = session_id
-                        logger.info(f"✅ Recovered Spotify session for {member.name}: {title}")
+                        logger.info(f"Recovered Spotify session for {member.name}: {title}")
                         recovered_sessions['spotify'] += 1
                         del user_spotify_sessions[session_key]  # Mark as recovered
                     else:
@@ -236,13 +236,13 @@ class ActivityTracker:
         # Log summary
         if recovered_sessions['games'] > 0 or recovered_sessions['spotify'] > 0:
             logger.info(
-                f"✅ Recovered {recovered_sessions['games']} game and "
+                f"Recovered {recovered_sessions['games']} game and "
                 f"{recovered_sessions['spotify']} Spotify sessions from restart"
             )
         
         if closed_sessions['games'] > 0 or closed_sessions['spotify'] > 0:
             logger.info(
-                f"✔️  Properly closed {closed_sessions['games']} game and "
+                f"Properly closed {closed_sessions['games']} game and "
                 f"{closed_sessions['spotify']} Spotify sessions (users no longer active)"
             )
         

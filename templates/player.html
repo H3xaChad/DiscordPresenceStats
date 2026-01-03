@@ -10,9 +10,17 @@
     </div>
     <div class="player-info-row">
         <img src="{{ player.avatar_url or 'https://cdn.discordapp.com/embed/avatars/' ~ ((player.user_id // 4194304) % 6) ~ '.png?size=256' }}" alt="{{ player.display_name or player.username }}" class="player-avatar-large" loading="lazy">
-        <article class="stat-card stat-card-expanded">
+        <article class="stat-card">
             <header>⏱️ Total Playtime</header>
             <h2>{{ player.total_playtime_readable }}</h2>
+        </article>
+        <article class="stat-card">
+            <header>🎮 Games Played</header>
+            <h2>{{ player.games_played }}</h2>
+        </article>
+        <article class="stat-card">
+            <header>🎵 Spotify Time</header>
+            <h2>{{ spotify.readable }}</h2>
         </article>
     </div>
 </div>
